@@ -1,20 +1,18 @@
 package com.userfaltakas.sceneformdemo
 
 import android.os.Bundle
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.google.ar.core.AugmentedImage
 import com.google.ar.core.Frame
 import com.google.ar.core.TrackingState
 import com.google.ar.sceneform.math.Vector3
 import com.google.ar.sceneform.ux.ArFragment
-import com.userfaltakas.sceneformdemo.Constants.BIG_VALUE
+import com.userfaltakas.sceneformdemo.Constants.DIV_VALUE
 import com.userfaltakas.sceneformdemo.Constants.MAX_DISTANCE
-import com.userfaltakas.sceneformdemo.Constants.MAX_ERROR_TOLERANCE
-import com.userfaltakas.sceneformdemo.Constants.SMALL_VALUE
+import com.userfaltakas.sceneformdemo.Constants.MAX_POSITION
 import com.userfaltakas.sceneformdemo.databinding.ActivityMainBinding
 import kotlinx.android.synthetic.main.activity_main.*
-import java.util.*
-import kotlin.collections.HashMap
 import kotlin.math.sqrt
 
 class MainActivity : AppCompatActivity() {
@@ -23,25 +21,28 @@ class MainActivity : AppCompatActivity() {
     private val augmentedImageMap = HashMap<AugmentedImage, AugmentedImageNode>()
     private var imageExist = true
     private val sound = Sound(this@MainActivity)
-    private var errorTolerance = 0
-    private var startVector = Vector3(0f, 0f, 0f)
+    private var firstVector = Vector3(0f, 0f, 0f)
+    private var secondVector = Vector3(0f, 0f, 0f)
+    private var functionality = 1
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         arFragment = fragment as ArFragment
+        binding.settings.setOnClickListener {
+            setDialog().show()
+        }
 
         arFragment.arSceneView.scene.addOnUpdateListener {
             val curFrame = arFragment.arSceneView.arFrame
-            val curScene = arFragment.arSceneView.scene
             if (curFrame != null && curFrame.camera.trackingState == TrackingState.TRACKING) {
-                updateTrackerImage(curFrame, curScene)
+                updateTrackerImage(curFrame)
             }
         }
     }
 
-    private fun updateTrackerImage(frame: Frame, scene: com.google.ar.sceneform.Scene) {
+    private fun updateTrackerImage(frame: Frame) {
         val imageList = frame.getUpdatedTrackables(AugmentedImage::class.java)
         val worldPosition = frame.camera.pose
 
@@ -50,61 +51,42 @@ class MainActivity : AppCompatActivity() {
         for (image in imageList) {
             if (image.trackingState == TrackingState.TRACKING) {
                 if (image.trackingMethod == AugmentedImage.TrackingMethod.FULL_TRACKING || image.trackingMethod == AugmentedImage.TrackingMethod.LAST_KNOWN_POSE) {
-                    errorTolerance = 0
                     imageExist = true
 
                     if (!augmentedImageMap.containsKey(image)) {
                         AugmentedImageNode(this).apply {
-                            //sound.startMediaPlayer()
+                            sound.startMediaPlayer()
                             setAugmentedImage(image)
                             augmentedImageMap[image] = this
                             arFragment.arSceneView.scene.addChild(this)
-                            startVector = scene.camera.worldPosition
-                            startVector.z = 0f
-                            startVector.x.times(1000000)
-                            startVector.y.times(1000000)
+                            val objectPose = this.localPosition
+                            firstVector.x = objectPose.x - worldPosition.tx()
+                            firstVector.y = objectPose.y - worldPosition.ty()
+                            firstVector.z = 0f
                         }
                     } else {
                         AugmentedImageNode(this).apply {
                             if (!image.anchors.isEmpty()) {
-//                              val objectPose = image.anchors.first().pose
                                 val objectPose = this.localPosition
+                                secondVector.x = objectPose.x - worldPosition.tx()
+                                secondVector.y = objectPose.y - worldPosition.ty()
+                                secondVector.z = 0f
 
-//                                val cameraPosition: Vector3 = scene.camera.worldPosition
-//                                val catPosition: Vector3 = this.worldPosition
-//                                val direction = Vector3.subtract(cameraPosition, catPosition)
-//
-//                                Log.d("direction", direction.toString())
+                                val position =
+                                    Vector3.angleBetweenVectors(firstVector, secondVector)
 
-                                val cameraPosition: Vector3 = scene.camera.worldPosition
-                                cameraPosition.z = 0f
-                                cameraPosition.x.times(1000000)
-                                cameraPosition.y.times(1000000)
+                                val isLeft = firstVector.x < secondVector.x
 
-                                val a =
-                                    Vector3.angleBetweenVectors(startVector, cameraPosition)
+                                secondVector.z = objectPose.z - worldPosition.tz()
 
-                                val dx: Float = objectPose.x - worldPosition.tx()
-                                val dy: Float = objectPose.y - worldPosition.ty()
-                                val dz: Float = objectPose.z - worldPosition.tz()
-
-
-                                val distance = sqrt(dx * dx + dy * dy + dz * dz)
-                                setSound(distance, dx)
-
+                                setSound(getDistance(secondVector), position, isLeft)
                                 setTextViews(
-                                    image.name,
-                                    "%.2f".format(distance) + "m",
-                                    "%.2f".format(a)
+                                    "%.2f".format(getDistance(secondVector)) + "m",
+                                    "%.2f".format(position),
+                                    isLeft
                                 )
                             }
                         }
-                    }
-                } else if (image.trackingMethod == AugmentedImage.TrackingMethod.LAST_KNOWN_POSE) {
-                    if (errorTolerance > MAX_ERROR_TOLERANCE) {
-                        sound.pause()
-                    } else {
-                        errorTolerance++
                     }
                 }
             } else if (image.trackingState == TrackingState.STOPPED) {
@@ -113,39 +95,79 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (!imageExist) {
-            setTextViews("0.00", "0.00", "0.00")
+            setTextViews("0.00", "0.00", null)
         }
     }
 
-    private fun setTextViews(imageName: String, distance: String, position: String) {
-        binding.imageName.text = imageName
+    private fun setTextViews(distance: String, position: String, isLeft: Boolean?) {
         binding.distanceTextView.text = distance
         binding.positionTextView.text = position
+        when (isLeft) {
+            true -> {
+                binding.imageName.text = "<-"
+            }
+            false -> {
+                binding.imageName.text = "->"
+            }
+            else -> {
+                binding.imageName.text = "none"
+            }
+        }
+
     }
 
-    private fun setSound(distance: Float, dx: Float) {
-        if (distance < MAX_DISTANCE) {
-            sound.start()
-            when {
-                dx > 0 -> {
-                    sound.changeVolume(
-                        1 - distance - (dx / SMALL_VALUE),
-                        1 - distance - (dx / BIG_VALUE)
-                    )
-                }
-                dx < 0 -> {
-                    sound.changeVolume(
-                        (1 - distance) + (dx / BIG_VALUE),
-                        1 - distance + (dx / SMALL_VALUE)
-                    )
-                }
-                else -> {
-                    sound.changeVolume(1 - distance, 1 - distance)
-                }
-            }
+    private fun getDistance(vector: Vector3): Float {
+        return sqrt(vector.x * vector.x + vector.y * vector.y + vector.z * vector.z)
+    }
 
-        } else if (distance > MAX_DISTANCE) {
-            sound.pause()
+    private fun setSound(distance: Float, position: Float, isLeft: Boolean) {
+        if (functionality == 1) {
+            if (distance <= MAX_DISTANCE && position < MAX_POSITION) {
+                sound.start()
+                when (isLeft) {
+                    true -> {
+                        sound.changeVolume(
+                            1 - distance - position.div(DIV_VALUE),
+                            1 - distance + position.div(DIV_VALUE)
+                        )
+                    }
+                    false -> {
+                        sound.changeVolume(
+                            1 - distance + position.div(DIV_VALUE),
+                            1 - distance - position.div(DIV_VALUE)
+                        )
+                    }
+                }
+            } else {
+                sound.pause()
+            }
+        } else if (functionality == 0) {
+            if (distance <= MAX_DISTANCE) {
+                sound.start()
+                sound.changeVolume(1 - distance - 0.2f, 1 - distance - 0.2f)
+            } else {
+                sound.pause()
+            }
         }
     }
+
+    private fun setDialog(): AlertDialog {
+        val options = arrayOf("Distance only", "Distance + rotation")
+        return AlertDialog.Builder(this)
+            .setTitle("Functionality")
+            .setSingleChoiceItems(options, functionality) { _, i ->
+                functionality = i
+            }.setPositiveButton("OK") { _, _ ->
+                if (functionality == 0) {
+                    binding.imageName.visibility = android.view.View.GONE
+                    binding.rotateImage.visibility = android.view.View.GONE
+                    binding.positionTextView.visibility = android.view.View.GONE
+                } else {
+                    binding.imageName.visibility = android.view.View.VISIBLE
+                    binding.rotateImage.visibility = android.view.View.VISIBLE
+                    binding.positionTextView.visibility = android.view.View.VISIBLE
+                }
+            }.create()
+    }
+
 }

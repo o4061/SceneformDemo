@@ -1,8 +1,7 @@
 package com.userfaltakas.sceneformdemo
 
 object Constants {
-    const val MAX_ERROR_TOLERANCE = 20
-    const val MAX_DISTANCE = 1f
-    const val BIG_VALUE = 5
-    const val SMALL_VALUE = 2
+    const val MAX_DISTANCE = 0.8f
+    const val DIV_VALUE = 1.4f
+    const val MAX_POSITION = 50
 }
